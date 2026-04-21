@@ -1,0 +1,95 @@
+# ---- OS / Editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Testing / Lint / Type check ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Environment files ----
+.env
+.env.*
+*.local
+
+# ---- Deep learning artifacts ----
+checkpoints/
+ckpt/
+weights/
+models/
+saved_models/
+runs/
+outputs/
+results/
+experiments/
+lightning_logs/
+tb_logs/
+tensorboard/
+wandb/
+mlruns/
+
+# ---- Data (large / generated) ----
+data/
+datasets/
+cache/
+.tmp/
+tmp/
+
+# ---- Common model/data files ----
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pkl
+*.joblib
+
+# ---- Package manager locks (optional; keep if needed) ----
+# poetry.lock
+# Pipfile.lock
