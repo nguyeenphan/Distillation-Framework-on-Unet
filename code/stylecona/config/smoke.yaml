@@ -1,0 +1,32 @@
+data:
+  root_dir: dataset
+  layout: flat
+  train_split: train
+  val_split: val
+  test_split: test
+  target_val_split: null
+  image_size: 128
+  num_workers: 0
+
+train:
+  epochs: 1
+  batch_size: 2
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  seed: 42
+  mixed_precision: false
+  log_interval: 10
+
+stycona:
+  enable: false
+  prob: 0.0
+  min_step: 1
+  min_start: 1
+  k_vectors: 16
+  auxiliary_source: paired_styles
+  style_variant_sampling: random
+
+runtime:
+  output_dir: outputs/stylecona_smoke
+  checkpoint_name: best.pt
+  device: auto

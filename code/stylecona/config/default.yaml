@@ -1,0 +1,35 @@
+data:
+  root_dir: dataset
+  layout: flat
+  train_split: train
+  val_split: val
+  test_split: test
+  target_val_split: null
+  image_size: 256
+  num_workers: 0
+
+train:
+  epochs: 30
+  batch_size: 8
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  seed: 42
+  mixed_precision: true
+  log_interval: 20
+
+stycona:
+  enable: true
+  prob: 0.5
+  min_step: 1
+  min_start: 1
+  k_vectors: 16
+  # paired_styles: dùng file {id}_styleK_img.png cùng id với {id}_img.png làm auxiliary (không shuffle batch)
+  # batch_shuffle: auxiliary = ảnh khác trong cùng batch (chế độ cũ)
+  auxiliary_source: paired_styles
+  # random | first | cycle — chọn một trong các ảnh style K của cùng id
+  style_variant_sampling: random
+
+runtime:
+  output_dir: outputs/stylecona
+  checkpoint_name: best.pt
+  device: auto
