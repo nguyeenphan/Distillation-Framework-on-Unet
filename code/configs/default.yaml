@@ -71,5 +71,6 @@ training:
   scheduler: "cosine"                   # "cosine" | "step" | "none"
   warmup_epochs: 5
   val_every: 5
+  save_every: 10          # save a checkpoint every N epochs (0 = disabled)
   save_dir: "./checkpoints"
   log_dir: "./logs"

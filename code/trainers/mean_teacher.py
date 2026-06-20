@@ -13,6 +13,7 @@ Training loop:
 """
 
 import os
+import csv
 from pathlib import Path
 
 import torch
@@ -21,6 +22,12 @@ from torch.utils.data import DataLoader
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    _TB_AVAILABLE = True
+except ImportError:
+    _TB_AVAILABLE = False
 
 from augmentation.stycona import StyConaAugmentor
 from augmentation.view_generator import ViewGenerator
@@ -83,29 +90,68 @@ class MeanTeacherTrainer:
         self.save_dir = Path(tcfg["save_dir"])
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.best_dice = 0.0
+        self.save_every = tcfg.get("save_every", 0)  # 0 = disabled
+
+        log_dir = Path(tcfg.get("log_dir", "./logs"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # CSV log
+        self.csv_path = log_dir / "train_log.csv"
+        with open(self.csv_path, "w", newline="") as f:
+            csv.writer(f).writerow(["epoch", "train_loss", "val_dice", "val_iou"])
+
+        # TensorBoard
+        self.writer = SummaryWriter(log_dir=str(log_dir)) if _TB_AVAILABLE else None
 
     # ──────────────────────────────────────────
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader) -> None:
+        val_every = self.cfg["training"].get("val_every", 5)
+
         for epoch in range(1, self.epochs + 1):
-            self._train_one_epoch(train_loader, epoch)
+            train_loss = self._train_one_epoch(train_loader, epoch)
             self.scheduler.step()
 
-            if epoch % self.cfg["training"].get("val_every", 5) == 0:
-                metrics = self._validate(val_loader)
-                dice = metrics["dice"]
-                print(f"[Epoch {epoch}] val Dice={dice:.4f}  IoU={metrics['iou']:.4f}")
+            val_dice, val_iou = float("nan"), float("nan")
 
-                if dice > self.best_dice:
-                    self.best_dice = dice
+            if epoch % val_every == 0:
+                metrics = self._validate(val_loader)
+                val_dice = metrics["dice"]
+                val_iou = metrics["iou"]
+
+                if val_dice > self.best_dice:
+                    self.best_dice = val_dice
                     save_checkpoint(
                         self.student, self.optimizer, epoch,
                         self.save_dir / "best.pth",
                     )
 
+            # ── Per-epoch save ───────────────
+            if self.save_every and epoch % self.save_every == 0:
+                save_checkpoint(
+                    self.student, self.optimizer, epoch,
+                    self.save_dir / f"epoch_{epoch:04d}.pth",
+                )
+
+            # ── Console log ─────────────────
+            val_str = f"  val Dice={val_dice:.4f}  IoU={val_iou:.4f}" if epoch % val_every == 0 else ""
+            print(f"[Epoch {epoch:3d}/{self.epochs}]  loss={train_loss:.4f}{val_str}")
+
+            # ── CSV log ──────────────────────
+            with open(self.csv_path, "a", newline="") as f:
+                csv.writer(f).writerow([epoch, f"{train_loss:.6f}",
+                                        f"{val_dice:.4f}", f"{val_iou:.4f}"])
+
+            # ── TensorBoard ──────────────────
+            if self.writer:
+                self.writer.add_scalar("Loss/train", train_loss, epoch)
+                if epoch % val_every == 0:
+                    self.writer.add_scalar("Val/Dice", val_dice, epoch)
+                    self.writer.add_scalar("Val/IoU", val_iou, epoch)
+
     # ──────────────────────────────────────────
 
-    def _train_one_epoch(self, loader: DataLoader, epoch: int) -> None:
+    def _train_one_epoch(self, loader: DataLoader, epoch: int) -> float:
         self.student.train()
         self.teacher.model.eval()
 
@@ -161,6 +207,8 @@ class MeanTeacherTrainer:
 
             loss_meter.update(loss.item(), images.shape[0])
             pbar.set_postfix(loss=f"{loss_meter.avg:.4f}", lam=f"{lam:.3f}")
+
+        return loss_meter.avg
 
     # ──────────────────────────────────────────
 

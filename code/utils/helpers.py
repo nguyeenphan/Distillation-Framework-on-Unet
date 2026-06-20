@@ -6,6 +6,7 @@ Seed, checkpoint save/load, AverageMeter.
 
 import os
 import random
+from typing import Optional, Union
 import numpy as np
 import torch
 import torch.nn as nn
@@ -25,7 +26,7 @@ def save_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     epoch: int,
-    path: str | Path,
+    path: Union[str, Path],
 ) -> None:
     torch.save({
         "epoch": epoch,
@@ -37,8 +38,8 @@ def save_checkpoint(
 
 def load_checkpoint(
     model: nn.Module,
-    path: str | Path,
-    optimizer: torch.optim.Optimizer | None = None,
+    path: Union[str, Path],
+    optimizer: Optional[torch.optim.Optimizer] = None,
 ) -> int:
     ckpt = torch.load(str(path), map_location="cpu")
     model.load_state_dict(ckpt["model_state_dict"])

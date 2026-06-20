@@ -33,7 +33,12 @@ def main():
         cfg = yaml.safe_load(f)
 
     set_seed(cfg.get("seed", 42))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
     print(f"Device: {device}")
 
     # ── Datasets ─────────────────────────────
@@ -54,12 +59,13 @@ def main():
         base_image_only=dcfg.get("base_image_only", False),
     )
 
+    pin_memory = device.type == "cuda"
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg["training"]["batch_size"],
         shuffle=True,
         num_workers=dcfg["num_workers"],
-        pin_memory=True,
+        pin_memory=pin_memory,
         drop_last=True,
     )
     val_loader = DataLoader(
@@ -67,7 +73,7 @@ def main():
         batch_size=cfg["training"]["batch_size"],
         shuffle=False,
         num_workers=dcfg["num_workers"],
-        pin_memory=True,
+        pin_memory=pin_memory,
     )
 
     print(f"Train: {len(train_ds)} samples | Val: {len(val_ds)} samples")

@@ -10,6 +10,8 @@ in leaf disease segmentation (small disease spots, large background).
 Inspired by DeSTSeg (Zhang et al., 2023).
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,7 +33,7 @@ class FocalLoss(nn.Module):
         alpha:  class weight for the positive (disease) class. None = no weighting.
     """
 
-    def __init__(self, gamma: float = 2.0, alpha: float | None = None):
+    def __init__(self, gamma: float = 2.0, alpha: Optional[float] = None):
         super().__init__()
         self.gamma = gamma
         self.alpha = alpha
@@ -132,7 +134,7 @@ class SupervisedLoss(nn.Module):
         dice_weight: float = 1.0,
         l1_weight: float = 0.5,
         focal_gamma: float = 2.0,
-        focal_alpha: float | None = None,
+        focal_alpha: Optional[float] = None,
     ):
         super().__init__()
         self.focal = FocalLoss(gamma=focal_gamma, alpha=focal_alpha)
