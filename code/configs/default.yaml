@@ -1,0 +1,75 @@
+# ──────────────────────────────────────────────
+# Default configuration
+# ──────────────────────────────────────────────
+
+seed: 42
+
+# ── Data ──────────────────────────────────────
+data:
+  train_dir: "../dataset/train"
+  val_dir: "../dataset/val"
+  test_dir: "../dataset/test"
+  image_size: 256
+  num_workers: 4
+  base_image_only: true                 # supervise only on the real photo {id}_img.png
+  auxiliary_from_styles: true           # StyCona style donor = a CAST _style{n} variant
+
+# ── Model ─────────────────────────────────────
+model:
+  backbone: "resnet18"
+  pretrained: true
+  num_classes: 2                       # background + disease
+  in_channels: 3
+  use_aspp: true                       # ASPP segmentation head (DeSTSeg-inspired)
+  aspp_rates: [6, 12, 18]             # atrous convolution dilation rates
+
+# ── StyCona augmentation ─────────────────────
+stycona:
+  enabled: true
+  style_alpha_range: [0.3, 0.7]        # σ interpolation range
+  content_mix:
+    enabled: true                       # ablate: set false to test style-only
+    t: 0.1                              # content blend strength (keep small!)
+    top_k_ranks: 3                      # only mix top-k singular components
+  per_channel_svd: true                 # SVD each channel independently
+
+# ── View generation ──────────────────────────
+views:
+  strong:                               # heavy augmentation for student
+    color_jitter: 0.4
+    random_gray_prob: 0.2
+    gaussian_blur_prob: 0.5
+  weak:                                 # light augmentation for teacher
+    color_jitter: 0.1
+    random_gray_prob: 0.0
+    gaussian_blur_prob: 0.0
+
+# ── Mean Teacher ─────────────────────────────
+mean_teacher:
+  ema_decay: 0.999                      # ξ ← m·ξ + (1−m)·θ
+  consistency_weight_max: 1.0
+  consistency_rampup_epochs: 30         # linear ramp-up from 0 → max
+
+# ── Loss ─────────────────────────────────────
+loss:
+  supervised:
+    focal_weight: 1.0
+    focal_gamma: 2.0                    # focusing param (0 = standard CE, 2 = typical)
+    focal_alpha: null                   # class weight for disease class (null = balanced)
+    dice_weight: 1.0
+    l1_weight: 0.5                      # boundary sharpness (DeSTSeg-inspired)
+  consistency:
+    type: "mse"                         # "mse" or "kl"
+
+# ── Training ─────────────────────────────────
+training:
+  epochs: 100
+  batch_size: 16
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  optimizer: "adam"
+  scheduler: "cosine"                   # "cosine" | "step" | "none"
+  warmup_epochs: 5
+  val_every: 5
+  save_dir: "./checkpoints"
+  log_dir: "./logs"
