@@ -29,8 +29,6 @@ try:
 except ImportError:
     _TB_AVAILABLE = False
 
-from augmentation.stycona import StyConaAugmentor
-from augmentation.view_generator import ViewGenerator
 from models.ema import EMAModel
 from losses.losses import SupervisedLoss, ConsistencyLoss, consistency_weight
 from utils.metrics import compute_metrics
@@ -47,20 +45,6 @@ class MeanTeacherTrainer:
         self.student = student.to(device)
         self.teacher = EMAModel(student, decay=cfg["mean_teacher"]["ema_decay"]).to(device)
 
-        # ── Augmentation ─────────────────────
-        sc = cfg["stycona"]
-        self.stycona = StyConaAugmentor(
-            style_alpha_range=tuple(sc["style_alpha_range"]),
-            content_mix_enabled=sc["content_mix"]["enabled"],
-            content_t=sc["content_mix"]["t"],
-            top_k_ranks=sc["content_mix"]["top_k_ranks"],
-            per_channel=sc["per_channel_svd"],
-        ) if sc["enabled"] else None
-
-        self.view_gen = ViewGenerator(
-            strong_cfg=cfg["views"]["strong"],
-            weak_cfg=cfg["views"]["weak"],
-        )
 
         # ── Losses ───────────────────────────
         lcfg = cfg["loss"]
@@ -90,7 +74,9 @@ class MeanTeacherTrainer:
         self.save_dir = Path(tcfg["save_dir"])
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.best_dice = 0.0
-        self.save_every = tcfg.get("save_every", 0)  # 0 = disabled
+        self.save_every = tcfg.get("save_every", 0)
+        self._last_val_dice = float("nan")
+        self._last_val_iou = float("nan")
 
         log_dir = Path(tcfg.get("log_dir", "./logs"))
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -112,15 +98,13 @@ class MeanTeacherTrainer:
             train_loss = self._train_one_epoch(train_loader, epoch)
             self.scheduler.step()
 
-            val_dice, val_iou = float("nan"), float("nan")
-
             if epoch % val_every == 0:
                 metrics = self._validate(val_loader)
-                val_dice = metrics["dice"]
-                val_iou = metrics["iou"]
+                self._last_val_dice = metrics["dice"]
+                self._last_val_iou = metrics["iou"]
 
-                if val_dice > self.best_dice:
-                    self.best_dice = val_dice
+                if self._last_val_dice > self.best_dice:
+                    self.best_dice = self._last_val_dice
                     save_checkpoint(
                         self.student, self.optimizer, epoch,
                         self.save_dir / "best.pth",
@@ -134,20 +118,21 @@ class MeanTeacherTrainer:
                 )
 
             # ── Console log ─────────────────
-            val_str = f"  val Dice={val_dice:.4f}  IoU={val_iou:.4f}" if epoch % val_every == 0 else ""
+            val_str = f"  val Dice={self._last_val_dice:.4f}  IoU={self._last_val_iou:.4f}" if epoch % val_every == 0 else ""
             print(f"[Epoch {epoch:3d}/{self.epochs}]  loss={train_loss:.4f}{val_str}")
 
-            # ── CSV log ──────────────────────
+            # ── CSV log — val columns carry the last computed value ──
             with open(self.csv_path, "a", newline="") as f:
                 csv.writer(f).writerow([epoch, f"{train_loss:.6f}",
-                                        f"{val_dice:.4f}", f"{val_iou:.4f}"])
+                                        f"{self._last_val_dice:.4f}",
+                                        f"{self._last_val_iou:.4f}"])
 
             # ── TensorBoard ──────────────────
             if self.writer:
                 self.writer.add_scalar("Loss/train", train_loss, epoch)
                 if epoch % val_every == 0:
-                    self.writer.add_scalar("Val/Dice", val_dice, epoch)
-                    self.writer.add_scalar("Val/IoU", val_iou, epoch)
+                    self.writer.add_scalar("Val/Dice", self._last_val_dice, epoch)
+                    self.writer.add_scalar("Val/IoU", self._last_val_iou, epoch)
 
     # ──────────────────────────────────────────
 
@@ -164,28 +149,9 @@ class MeanTeacherTrainer:
         pbar = tqdm(loader, desc=f"Epoch {epoch}", leave=False)
 
         for batch in pbar:
-            images = batch["image"]           # (B, 3, H, W)
-            auxiliaries = batch["auxiliary"]   # (B, 3, H, W)
-            masks = batch["mask"].to(self.device)  # (B, H, W)
-
-            # ── StyCona augmentation (image-level, per sample) ──
-            strong_views, weak_views = [], []
-            for i in range(images.shape[0]):
-                img_np = (images[i].permute(1, 2, 0).numpy() * 255).astype("uint8")
-                aux_np = (auxiliaries[i].permute(1, 2, 0).numpy() * 255).astype("uint8")
-
-                if self.stycona is not None:
-                    aug_np = self.stycona(img_np, aux_np)
-                    aug_t = torch.from_numpy(aug_np.transpose(2, 0, 1)).float().div(255.0)
-                else:
-                    aug_t = images[i]
-
-                sv, wv = self.view_gen(aug_t)
-                strong_views.append(sv)
-                weak_views.append(wv)
-
-            strong = torch.stack(strong_views).to(self.device)
-            weak = torch.stack(weak_views).to(self.device)
+            strong = batch["strong_view"].to(self.device)  # (B, 3, H, W)
+            weak = batch["weak_view"].to(self.device)       # (B, 3, H, W)
+            masks = batch["mask"].to(self.device)           # (B, H, W)
 
             # ── Forward ──────────────────────
             student_out = self.student(strong)
@@ -205,7 +171,7 @@ class MeanTeacherTrainer:
             # ── EMA update ───────────────────
             self.teacher.update(self.student)
 
-            loss_meter.update(loss.item(), images.shape[0])
+            loss_meter.update(loss.item(), strong.shape[0])
             pbar.set_postfix(loss=f"{loss_meter.avg:.4f}", lam=f"{lam:.3f}")
 
         return loss_meter.avg

@@ -74,6 +74,7 @@ mlruns/
 
 # ---- Data (large / generated) ----
 dataset/
+visual/
 cache/
 .tmp/
 tmp/

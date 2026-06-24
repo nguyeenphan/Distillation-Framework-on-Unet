@@ -1,6 +1,6 @@
 # Domain-Generalizable Leaf Disease Segmentation
 
-A PyTorch framework for pixel-level leaf disease detection that generalises to unseen visual domains (new cameras, lighting conditions, leaf varieties) by combining three complementary techniques: offline style transfer, on-the-fly style–content decomposition, and semi-supervised consistency training.
+A PyTorch framework for pixel-level leaf disease detection that generalises to unseen visual domains (new cameras, lighting conditions, leaf varieties) by combining three complementary techniques: offline style transfer (CAST), on-the-fly style–content decomposition (StyCona), and semi-supervised consistency training (Mean Teacher).
 
 ---
 
@@ -12,103 +12,115 @@ Leaf disease segmentation models trained on a single visual domain often fail wh
 
 ## Framework Overview
 
-The pipeline consists of four stages executed in sequence:
+**Stage A — Offline style augmentation (CAST).** A Content-Aware Style Transfer model is run once to generate a bank of re-styled copies of every training image. Each copy shares the same ground-truth segmentation mask as its source, since CAST preserves spatial structure while changing appearance. For a source image `00001`, the bank contains `00001_style0` through `00001_style8`, each paired with its own mask.
 
-**Stage A — Offline style augmentation (CAST).** A Content-Aware Style Transfer model is run once to generate a bank of re-styled copies of every training image. Each copy shares the same ground-truth segmentation mask as its source, since CAST preserves spatial structure while changing appearance. For a source image `00001`, the bank contains `00001_style0` through `00001_style8`, each paired with its own mask (`00001_style0_seg`, etc.).
+**Stage B — On-the-fly style–content decomposition (StyCona).** During each training step, the current image and a randomly sampled CAST variant of the same leaf are decomposed via per-channel SVD. The singular values encode *style* (colour, brightness, contrast) while the singular vectors encode *content* (spatial structure). Style blending interpolates the singular values; content mixing gently perturbs the top-k rank-one components. Recomposing the modified factors produces a novel sample that looks different from both parents but shares their ground-truth mask.
 
-**Stage B — On-the-fly style–content decomposition (StyCona-inspired).** During each training step, the current image and a randomly sampled CAST variant of the same leaf are decomposed via per-channel Singular Value Decomposition (SVD). The singular values encode *style* (colour, brightness, contrast) while the left and right singular vectors encode *content* (spatial structure). Style blending interpolates the singular values between the two images, and content mixing gently perturbs the top-k rank-one components. Recomposing the modified factors produces a novel training sample that looks different from both parents but shares their ground-truth mask.
+**Stage C — Mean Teacher training.** The StyCona-augmented sample is passed through two augmentation paths: a strong view (heavy colour jitter, blur, random grayscale) fed to the Student, and a weak view (minimal perturbation) fed to the Teacher. The Teacher is an EMA copy of the Student and produces a pseudo-label. A consistency loss forces the Student to agree with the Teacher across different views, encouraging domain-invariant features.
 
-**Stage C — Mean Teacher training.** The augmented sample is passed through two parallel augmentation paths: a strong view (heavy colour jitter, blur, random grayscale) and a weak view (minimal perturbation). The student network processes the strong view and is trained with supervised loss against the ground truth. The teacher network, an Exponential Moving Average (EMA) copy of the student, processes the weak view and produces a pseudo-label. A consistency loss forces the student's predictions on the hard view to agree with the teacher's predictions on the easy view, encouraging the model to learn domain-invariant features.
-
-**Stage D — Loss and parameter updates.** The total loss is the sum of a supervised component (cross-entropy plus Dice loss between the student output and the ground-truth mask) and a consistency component (MSE between student and teacher soft predictions), weighted by a ramp-up schedule. The student is updated via backpropagation; the teacher is updated via EMA without gradients.
-
-At inference time, only the student network is used — the teacher, StyCona augmentation, and CAST variants are training-time components only.
+**Stage D — Loss and parameter updates.** Total loss = supervised (Focal + Dice + L1) + λ(t) × consistency (MSE or KL), where λ ramps up linearly over the first N epochs. The Student is updated via backpropagation; the Teacher via EMA without gradients. Only the Student is used at inference time.
 
 ---
 
 ## Architecture
 
-The segmentation backbone is a ResNet18-UNet: a ResNet18 encoder pretrained on ImageNet, paired with a symmetric decoder using transposed convolutions and skip connections at four resolution levels. The model outputs per-pixel class logits for background and disease.
+**Backbone:** ResNet18-UNet — ResNet18 encoder pretrained on ImageNet, symmetric decoder with transposed convolutions and skip connections at four resolution levels.
+
+**Head:** ASPP (Atrous Spatial Pyramid Pooling) with dilation rates [6, 12, 18] for multi-scale context, followed by two residual refinement blocks and a 1×1 classifier. Outputs per-pixel class logits for background and disease.
+
+**Total parameters:** ~14.6M
 
 ---
 
 ## Project Structure
 
 ```
-leaf-disease-dg/
-├── configs/
-│   └── default.yaml              # all hyperparameters in one place
+Distillation-Framework-on-Unet/
+├── dataset/
+│   ├── train/
+│   ├── val/
+│   └── test/
 │
-├── data/
-│   ├── dataset.py                # LeafDiseaseDataset: flat folder, auto-groups by leaf
-│   └── transforms.py             # spatial augmentations (albumentations)
-│
-├── augmentation/
-│   ├── stycona.py                # SVD decomposition → σ blend → u,v mix → recompose
-│   └── view_generator.py         # strong view (student) and weak view (teacher)
-│
-├── models/
-│   ├── resnet18_unet.py          # encoder-decoder segmentation network
-│   └── ema.py                    # EMA wrapper for the teacher
-│
-├── losses/
-│   └── losses.py                 # supervised (CE + Dice), consistency (MSE / KL)
-│
-├── trainers/
-│   └── mean_teacher.py           # full training loop with EMA updates
-│
-├── utils/
-│   ├── metrics.py                # IoU, Dice, precision, recall
-│   └── helpers.py                # seed, checkpoint save/load, AverageMeter
-│
-├── scripts/
-│   ├── train.py                  # entry-point: parse config → build → train
-│   └── evaluate.py               # run inference on test set or unseen domains
-│
-└── requirements.txt
+└── code/
+    ├── configs/
+    │   └── default.yaml              # all hyperparameters in one place
+    │
+    ├── data/
+    │   ├── dataset.py                # LeafDiseaseDataset: flat folder, groups by leaf
+    │   └── transforms.py             # spatial augmentations (albumentations)
+    │
+    ├── augmentation/
+    │   ├── stycona.py                # SVD decompose → σ blend → U,V mix → recompose
+    │   └── view_generator.py         # strong view (student) and weak view (teacher)
+    │
+    ├── models/
+    │   ├── resnet18_unet.py          # ResNet18 encoder + UNet decoder + ASPP head
+    │   └── ema.py                    # EMA wrapper for the teacher network
+    │
+    ├── losses/
+    │   └── losses.py                 # Focal, Dice, L1 (supervised) + MSE/KL (consistency)
+    │
+    ├── trainers/
+    │   └── mean_teacher.py           # full training loop with per-epoch CSV + TensorBoard log
+    │
+    ├── utils/
+    │   ├── metrics.py                # IoU, Dice, precision, recall
+    │   └── helpers.py                # seed, checkpoint save/load, AverageMeter
+    │
+    ├── scripts/
+    │   ├── train.py                  # entry-point: parse config → build → train
+    │   ├── evaluate.py               # inference on test set with optional visual output
+    │   ├── visualize_stycona.py      # quick 4-panel StyCona preview
+    │   └── stycona_cases.py          # full 6-row case breakdown of StyCona pipeline
+    │
+    ├── checkpoints/
+    │   └── best.pth                  # best student checkpoint (by val Dice)
+    │
+    └── logs/
+        ├── train_log.csv             # epoch, train_loss, val_dice, val_iou
+        └── events.out.tfevents.*     # TensorBoard log
 ```
 
 ---
 
 ## Data Layout
 
-Images and masks live side by side in flat folders, split into train / val / test:
-
 ```
 dataset/
 ├── train/
-│   ├── 00001_style0.png              # image
-│   ├── 00001_style0_seg.png          # mask (binary: 0=bg, 255=disease)
-│   ├── 00001_style1.png
+│   ├── 00001_img.png              # base image
+│   ├── 00001_seg.png              # mask (0 = background, 1 = disease)
+│   ├── 00001_style0_img.png       # CAST style variant 0
+│   ├── 00001_style0_seg.png       # same mask as base
+│   ├── 00001_style1_img.png
 │   ├── 00001_style1_seg.png
-│   ├── ...
-│   ├── 00001_style8.png
-│   ├── 00001_style8_seg.png
-│   ├── 00002_style0.png
-│   ├── 00002_style0_seg.png
 │   └── ...
 ├── val/
-│   └── (same pattern)
 └── test/
-    └── (same pattern)
 ```
 
 Naming convention:
-- Image: `{content_id}_style{n}.png`
-- Mask:  `{content_id}_style{n}_seg.png`
+- Base image:  `{content_id}_img.png`
+- Base mask:   `{content_id}_seg.png`
+- Style image: `{content_id}_style{n}_img.png`
+- Style mask:  `{content_id}_style{n}_seg.png`
 
-The dataset automatically groups images by `content_id` (e.g. `00001`), so StyCona can sample a random auxiliary from the same leaf but a different style. All styles of the same leaf share the same ground-truth disease regions.
+The dataset auto-groups images by `content_id` so StyCona can sample a random CAST auxiliary from the same leaf. With `base_image_only: false`, all style variants become supervised training samples with their own masks.
 
 ---
 
 ## Installation
 
 ```bash
-git clone <repo-url> && cd leaf-disease-dg
-pip install -r requirements.txt
+# Requires Python 3.10+ and a native arm64 environment on Apple Silicon
+git clone <repo-url>
+cd Distillation-Framework-on-Unet/code
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-Key dependencies: PyTorch >= 2.0, torchvision, albumentations, OpenCV, PyYAML.
+Key dependencies: `torch>=2.0`, `torchvision`, `albumentations>=2.0`, `opencv-python`, `PyYAML`, `tqdm`, `tensorboard`.
 
 ---
 
@@ -117,123 +129,149 @@ Key dependencies: PyTorch >= 2.0, torchvision, albumentations, OpenCV, PyYAML.
 ### Train
 
 ```bash
-python scripts/train.py --config configs/default.yaml
+cd code
+.venv/bin/python3 scripts/train.py --config configs/default.yaml
 ```
 
-The best checkpoint (by validation Dice) is saved to `checkpoints/best.pth`.
+**Outputs:**
+- `checkpoints/best.pth` — best student model by validation Dice
+- `logs/train_log.csv` — per-epoch `train_loss`, `val_dice`, `val_iou`
+- `logs/events.out.tfevents.*` — TensorBoard log
+
+Monitor training with TensorBoard:
+```bash
+.venv/bin/tensorboard --logdir logs/
+```
 
 ### Evaluate
 
 ```bash
-# Using test set from config
-python scripts/evaluate.py \
-    --config     configs/default.yaml \
-    --checkpoint checkpoints/best.pth
-
-# Or a custom unseen-domain folder
-python scripts/evaluate.py \
-    --config     configs/default.yaml \
+# All images (base + style variants)
+.venv/bin/python3 scripts/evaluate.py \
+    --config configs/default.yaml \
     --checkpoint checkpoints/best.pth \
-    --test_dir   ./unseen_domain
+    --vis_dir ./visualizations
+
+# Base images only
+.venv/bin/python3 scripts/evaluate.py \
+    --config configs/default.yaml \
+    --checkpoint checkpoints/best.pth \
+    --base_only
 ```
 
-Reports IoU, Dice, precision, and recall on the test set.
+The `--vis_dir` flag saves a side-by-side PNG per image: **Original | Ground Truth | Prediction**, with disease regions highlighted in red and per-image Dice score in the title.
+
+### Visualize StyCona pipeline
+
+```bash
+# Quick 4-panel preview (original | auxiliary | StyCona | mask)
+.venv/bin/python3 scripts/visualize_stycona.py --config configs/default.yaml --n 6
+
+# Full 6-row case breakdown
+.venv/bin/python3 scripts/stycona_cases.py --config configs/default.yaml --n 4 --out viz/cases
+```
+
+The full breakdown shows:
+| Row | Content |
+|-----|---------|
+| 1 | Original · GT mask overlay · Auxiliary (CAST) |
+| 2 | Style blend only at α = 0.30 / 0.50 / 0.70 |
+| 3 | Full StyCona (style + content mix) at α = 0.30 / 0.50 / 0.70 |
+| 4 | StyCona output · Strong view (Student) · Weak view (Teacher) |
+| 5 | All CAST style variants for this leaf |
+| 6 | StyCona xi + each style variant (α = 0.50) |
 
 ---
 
 ## Key Hyperparameters
 
-All hyperparameters are centralised in `configs/default.yaml`:
+All hyperparameters are in `configs/default.yaml`:
 
-| Parameter | Location | Default | Notes |
-|-----------|----------|---------|-------|
-| `stycona.style_alpha_range` | StyCona | [0.3, 0.7] | How far style blending deviates from the original |
-| `stycona.content_mix.enabled` | StyCona | true | Set false to ablate content mixing (style-only) |
-| `stycona.content_mix.t` | StyCona | 0.1 | Content blend strength — keep small to preserve labels |
-| `stycona.content_mix.top_k_ranks` | StyCona | 3 | Only mix the top-k singular components |
-| `mean_teacher.ema_decay` | Teacher | 0.999 | Higher = more stable teacher, slower adaptation |
-| `mean_teacher.consistency_rampup_epochs` | Teacher | 30 | Linear ramp-up from 0 → max consistency weight |
-| `mean_teacher.consistency_weight_max` | Teacher | 1.0 | Final consistency loss weight |
-| `views.strong.color_jitter` | Views | 0.4 | Colour augmentation strength for student |
-| `loss.consistency.type` | Loss | "mse" | "mse" or "kl" divergence |
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `data.base_image_only` | `false` | `true` = supervised on base only (472 samples); `false` = all styles (4248 samples) |
+| `stycona.style_alpha_range` | [0.3, 0.7] | Range of σ interpolation between xi and xj |
+| `stycona.content_mix.enabled` | `true` | Set `false` to ablate content mixing (style-only) |
+| `stycona.content_mix.t` | 0.1 | Content blend strength — keep small to preserve labels |
+| `stycona.content_mix.top_k_ranks` | 3 | Number of top singular components to mix |
+| `mean_teacher.ema_decay` | 0.999 | Higher = more stable teacher, slower adaptation |
+| `mean_teacher.consistency_rampup_epochs` | 30 | Linear ramp-up from 0 to max consistency weight |
+| `mean_teacher.consistency_weight_max` | 1.0 | Final consistency loss weight |
+| `loss.supervised.focal_gamma` | 2.0 | Focal loss focusing parameter (0 = standard CE) |
+| `loss.consistency.type` | `"mse"` | `"mse"` or `"kl"` divergence |
+| `training.epochs` | 150 | |
+| `training.lr` | 5e-4 | |
+| `training.warmup_epochs` | 10 | Linear LR warmup before cosine schedule |
 
 ---
 
-## Design Decisions
+## Training Results (Run 1 — base_image_only: true, 100 epochs)
 
-**CAST auxiliary selection.** The CAST auxiliary for StyCona is sampled from the same content ID (same leaf, different style), not from a different leaf. This ensures the ground-truth mask remains valid after SVD decomposition and recomposition, which is critical when disease spots are small.
+| Epoch | Val Dice | Val IoU |
+|-------|----------|---------|
+| 5 | 0.575 | 0.404 |
+| 35 | 0.609 | 0.438 |
+| 55 | 0.686 | 0.522 |
+| 70 | 0.703 | 0.541 |
+| **95** | **0.711** | **0.551** |
+| 100 | 0.708 | 0.548 |
 
-**StyCona at image-level.** SVD is applied directly to image pixels (per channel) rather than to intermediate feature maps. This avoids the numerical instability of differentiable SVD in the backward pass and eliminates the computational overhead of running SVD inside the training graph.
-
-**Content mixing as the differentiator.** Since CAST already performs style augmentation, the primary value-add of StyCona in this pipeline is content mixing (perturbing the spatial singular vectors). This can be ablated by setting `stycona.content_mix.enabled: false`.
-
-**Mean Teacher over knowledge distillation.** The teacher is an EMA copy of the student, not a separately trained model. The consistency loss directly encourages domain-invariant representations by forcing agreement between differently-augmented views of the same image.
+Best checkpoint at epoch 95: **Dice = 0.711, IoU = 0.551**
 
 ---
 
 ## Ablation Experiments
 
-| Experiment | Configuration change |
-|------------|---------------------|
+| Experiment | Config change |
+|------------|---------------|
 | Baseline (no StyCona) | `stycona.enabled: false` |
 | Style-only (no content mix) | `stycona.content_mix.enabled: false` |
 | No consistency loss | `mean_teacher.consistency_weight_max: 0` |
-| Different consistency loss | `loss.consistency.type: "kl"` |
+| KL consistency | `loss.consistency.type: "kl"` |
+| Base images only | `data.base_image_only: true` |
 
 ---
 
 ## Training Pipeline (per step)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Sample batch from train/:                                  │
-│    image    = 00001_style3.png                               │
-│    mask     = 00001_style3_seg.png                           │
-│    auxiliary = 00001_style7.png  (random, same leaf)         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│  StyCona: SVD(image) & SVD(auxiliary)                       │
-│    → blend σ' = α·σᵢ + (1−α)·σⱼ                           │
-│    → mix top-k u,v:  U' = (1−t)·Uᵢ + t·Uⱼ                │
-│    → recompose x' = U'·diag(σ')·V'ᵀ                       │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-    ┌──────────────┐   ┌──────────────┐
-    │  Strong view │   │  Weak view   │
-    │  (jitter,    │   │  (near-      │
-    │   blur,      │   │   original)  │
-    │   grayscale) │   │              │
-    └──────┬───────┘   └──────┬───────┘
-           │                  │
-           ▼                  ▼
-    ┌──────────────┐   ┌──────────────┐
-    │   Student    │   │   Teacher    │
-    │   fθ        │   │   fξ (EMA)  │
-    └──────┬───────┘   └──────┬───────┘
-           │                  │
-           ▼                  ▼
-    ┌──────────────────────────────────┐
-    │  L = L_sup(pred, mask)           │
-    │    + λ(t) · L_cons(pred, t_pred)│
-    └──────────────────────────────────┘
-           │
-    ┌──────┴───────┐
-    │  Backprop θ  │  →  EMA update ξ
-    └──────────────┘
+Sample batch:
+  image     = 00001_img.png          (supervised sample)
+  mask      = 00001_seg.png
+  auxiliary = 00001_style3_img.png   (CAST donor, same leaf)
+        |
+        v
+  StyCona augmentation:
+    SVD(image) & SVD(auxiliary)
+    -> blend  sigma' = alpha*si + (1-alpha)*sj
+    -> mix    U'[:, :k] = (1-t)*Ui + t*Uj
+    -> recompose  x' = U' * diag(sigma') * Vt'
+        |
+      split
+       / \
+      /   \
+Strong     Weak
+(jitter,   (near-
+ blur,      original)
+ gray)
+  |              |
+Student        Teacher
+  |              | (EMA, no grad)
+  +-----> L_sup(pred, mask)
+  +-----> L_cons(student_pred, teacher_pred) * lambda(epoch)
+        |
+    backprop -> update Student theta
+    EMA      -> update Teacher xi
 ```
 
 ---
 
 ## Evaluation Metrics
 
-- **IoU (Intersection over Union):** area of overlap divided by area of union between prediction and ground truth.
-- **Dice coefficient (F1):** harmonic mean of precision and recall.
-- **Precision:** fraction of predicted disease pixels that are truly diseased.
-- **Recall:** fraction of truly diseased pixels that were correctly detected.
+- **Dice (F1):** harmonic mean of precision and recall — primary metric
+- **IoU:** intersection over union between prediction and ground truth
+- **Precision:** fraction of predicted disease pixels that are truly diseased
+- **Recall:** fraction of truly diseased pixels correctly detected
 
 ---
 
@@ -242,6 +280,7 @@ All hyperparameters are centralised in `configs/default.yaml`:
 - **CAST:** Y. Zhang et al., "Domain Enhanced Arbitrary Image Style Transfer via Contrastive Learning," SIGGRAPH 2022.
 - **StyCona:** S. Li et al., "StyCona: Style-based Data Augmentation via SVD Style–Content Decomposition for Domain Generalisation."
 - **Mean Teacher:** A. Tarvainen and H. Valpola, "Mean teachers are better role models," NeurIPS 2017.
+- **DeSTSeg:** Z. Zhang et al., "DeSTSeg: Segmentation Guided Denoising Student-Teacher for Anomaly Detection," CVPR 2023.
 
 ---
 

@@ -10,8 +10,8 @@ data:
   val_dir: "../dataset/val"
   test_dir: "../dataset/test"
   image_size: 256
-  num_workers: 0
-  base_image_only: true                 # supervise only on the real photo {id}_img.png
+  num_workers: 8
+  base_image_only: false                # use all images incl. CAST styles (4248 vs 472)
   auxiliary_from_styles: true           # StyCona style donor = a CAST _style{n} variant
 
 # ── Model ─────────────────────────────────────
@@ -63,14 +63,14 @@ loss:
 
 # ── Training ─────────────────────────────────
 training:
-  epochs: 100
+  epochs: 150
   batch_size: 16
-  lr: 1.0e-3
+  lr: 5.0e-4
   weight_decay: 1.0e-4
   optimizer: "adam"
   scheduler: "cosine"                   # "cosine" | "step" | "none"
-  warmup_epochs: 5
-  val_every: 5
-  save_every: 0           # save a checkpoint every N epochs (0 = disabled)
+  warmup_epochs: 10
+  val_every: 1
+  save_every: 10           # save a checkpoint every N epochs (0 = disabled)
   save_dir: "./checkpoints"
   log_dir: "./logs"

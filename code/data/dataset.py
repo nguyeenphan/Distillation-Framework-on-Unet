@@ -51,6 +51,8 @@ class LeafDiseaseDataset(Dataset):
         transform: Optional[Callable] = None,
         base_image_only: bool = False,
         auxiliary_from_styles: bool = False,
+        stycona=None,
+        view_gen=None,
     ):
         """
         Args:
@@ -65,6 +67,8 @@ class LeafDiseaseDataset(Dataset):
         self.image_size = image_size
         self.transform = transform
         self.auxiliary_from_styles = auxiliary_from_styles
+        self.stycona = stycona
+        self.view_gen = view_gen
 
         # ── Discover all image / mask pairs ──────────────
         # records holds EVERY image (base + styles); samples is the subset used
@@ -136,16 +140,20 @@ class LeafDiseaseDataset(Dataset):
             mask = transformed["mask"]
 
         auxiliary = cv2.resize(auxiliary, (self.image_size, self.image_size))
-
-        # ── To tensors ───────────────────────
-        image = self._to_tensor(image)
-        auxiliary = self._to_tensor(auxiliary)
         mask = torch.from_numpy(mask).long()
 
+        # ── StyCona + views (runs in DataLoader worker) ──
+        if self.stycona is not None and self.view_gen is not None:
+            aug_np = self.stycona(image, auxiliary)
+            aug_t = torch.from_numpy(aug_np.transpose(2, 0, 1)).float().div(255.0)
+            strong_view, weak_view = self.view_gen(aug_t)
+            return {"strong_view": strong_view, "weak_view": weak_view, "mask": mask}
+
+        # ── Fallback (val set, no augmentation) ─────────
         return {
-            "image": image,            # [3, H, W]
-            "auxiliary": auxiliary,     # [3, H, W]
-            "mask": mask,              # [H, W]
+            "image": self._to_tensor(image),
+            "auxiliary": self._to_tensor(auxiliary),
+            "mask": mask,
             "content_id": rec["content_id"],
         }
 
