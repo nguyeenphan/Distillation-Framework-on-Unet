@@ -1,0 +1,87 @@
+# ──────────────────────────────────────────────
+# Run 2 — dựa trên phân tích 150 epoch của run 1
+# Best run1: Dice=0.6512 @ epoch 79
+# Vấn đề: StyCona quá mạnh, consistency weight quá cao,
+#          LR cosine xuống quá thấp cuối training
+# ──────────────────────────────────────────────
+
+seed: 42
+
+# ── Data ──────────────────────────────────────
+data:
+  train_dir: "../dataset/train"
+  val_dir: "../dataset/val"
+  test_dir: "../dataset/test"
+  image_size: 256
+  num_workers: 8
+  base_image_only: false
+  auxiliary_from_styles: true
+
+# ── Model ─────────────────────────────────────
+model:
+  backbone: "resnet18"
+  pretrained: true
+  num_classes: 2
+  in_channels: 3
+  use_aspp: true
+  aspp_rates: [6, 12, 18]
+
+# ── StyCona augmentation ─────────────────────
+# Run 1: [0.3, 0.7] → quá mạnh, model học style shift thay vì features
+# Run 2: [0.1, 0.4] → nhẹ hơn, giữ nội dung gốc nhiều hơn
+stycona:
+  enabled: true
+  style_alpha_range: [0.1, 0.4]
+  content_mix:
+    enabled: true
+    t: 0.05                              # giảm từ 0.1 → 0.05, ít trộn nội dung hơn
+    top_k_ranks: 3
+  per_channel_svd: true
+
+# ── View generation ──────────────────────────
+# Run 1: color_jitter=0.4 → gây dao động Dice lớn (~0.05-0.08/epoch)
+# Run 2: giảm xuống 0.2 để student nhận views gần với ảnh thực hơn
+views:
+  strong:
+    color_jitter: 0.2                    # giảm từ 0.4
+    random_gray_prob: 0.1                # giảm từ 0.2
+    gaussian_blur_prob: 0.3              # giảm từ 0.5
+  weak:
+    color_jitter: 0.05                   # giảm từ 0.1
+    random_gray_prob: 0.0
+    gaussian_blur_prob: 0.0
+
+# ── Mean Teacher ─────────────────────────────
+# Run 1: consistency_weight=1.0 → supervised và consistency ngang nhau
+# Run 2: giảm xuống 0.5, để supervised loss chiếm ưu thế hơn
+mean_teacher:
+  ema_decay: 0.996                       # giảm từ 0.999, teacher cập nhật nhanh hơn
+  consistency_weight_max: 0.5            # giảm từ 1.0
+  consistency_rampup_epochs: 20          # giảm từ 30
+
+# ── Loss ─────────────────────────────────────
+loss:
+  supervised:
+    focal_weight: 1.0
+    focal_gamma: 2.0
+    focal_alpha: null
+    dice_weight: 1.0
+    l1_weight: 0.5
+  consistency:
+    type: "mse"
+
+# ── Training ─────────────────────────────────
+# Run 1: LR=5e-4, cosine → đóng băng ở ~0.321 loss từ epoch 130
+# Run 2: LR thấp hơn (2e-4), 120 epoch (run1 best ở epoch 79, không cần 150)
+training:
+  epochs: 120
+  batch_size: 16
+  lr: 2.0e-4                             # giảm từ 5e-4
+  weight_decay: 1.0e-4
+  optimizer: "adam"
+  scheduler: "cosine"
+  warmup_epochs: 5                       # giảm từ 10
+  val_every: 1
+  save_every: 10
+  save_dir: "./checkpoints_run2"
+  log_dir: "./logs_run2"
