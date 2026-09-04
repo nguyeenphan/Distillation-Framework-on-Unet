@@ -22,6 +22,7 @@ from data.dataset import LeafDiseaseDataset
 from data.transforms import get_train_transform, get_val_transform
 from models.resnet18_unet import ResNet18UNet
 from trainers.mean_teacher import MeanTeacherTrainer
+from trainers.spectral import SpectralTrainer
 from utils.helpers import set_seed
 
 
@@ -66,6 +67,8 @@ def main():
         auxiliary_from_styles=dcfg.get("auxiliary_from_styles", False),
         stycona=stycona,
         view_gen=view_gen,
+        spectral=dcfg.get("spectral", False),
+        style_twin=dcfg.get("style_twin", "spectral"),
     )
     # Validation: evaluate on the real photos only (no CAST styles, no StyCona).
     val_ds = LeafDiseaseDataset(
@@ -114,7 +117,10 @@ def main():
     print(f"Model params: {sum(p.numel() for p in student.parameters()):,}")
 
     # ── Train ────────────────────────────────
-    trainer = MeanTeacherTrainer(cfg, student, device)
+    if dcfg.get("spectral", False):
+        trainer = SpectralTrainer(cfg, student, device)
+    else:
+        trainer = MeanTeacherTrainer(cfg, student, device)
     trainer.train(train_loader, val_loader)
 
     print("Training complete.")

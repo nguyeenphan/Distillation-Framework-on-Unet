@@ -31,7 +31,7 @@ except ImportError:
 
 from models.ema import EMAModel
 from losses.losses import SupervisedLoss, ConsistencyLoss, consistency_weight
-from utils.metrics import compute_metrics
+from utils.metrics import compute_metrics, collapse_stats
 from utils.helpers import save_checkpoint, AverageMeter
 
 
@@ -84,7 +84,8 @@ class MeanTeacherTrainer:
         # CSV log
         self.csv_path = log_dir / "train_log.csv"
         with open(self.csv_path, "w", newline="") as f:
-            csv.writer(f).writerow(["epoch", "train_loss", "val_dice", "val_iou"])
+            csv.writer(f).writerow(["epoch", "train_loss", "val_dice", "val_iou",
+                                    "pred_entropy", "pred_fg_rate"])
 
         # TensorBoard
         self.writer = SummaryWriter(log_dir=str(log_dir)) if _TB_AVAILABLE else None
@@ -95,7 +96,7 @@ class MeanTeacherTrainer:
         val_every = self.cfg["training"].get("val_every", 5)
 
         for epoch in range(1, self.epochs + 1):
-            train_loss = self._train_one_epoch(train_loader, epoch)
+            train_loss, ent, fg = self._train_one_epoch(train_loader, epoch)
             self.scheduler.step()
 
             if epoch % val_every == 0:
@@ -119,24 +120,27 @@ class MeanTeacherTrainer:
 
             # ── Console log ─────────────────
             val_str = f"  val Dice={self._last_val_dice:.4f}  IoU={self._last_val_iou:.4f}" if epoch % val_every == 0 else ""
-            print(f"[Epoch {epoch:3d}/{self.epochs}]  loss={train_loss:.4f}{val_str}")
+            print(f"[Epoch {epoch:3d}/{self.epochs}]  loss={train_loss:.4f}  H={ent:.3f}  fg={fg:.4f}{val_str}")
 
             # ── CSV log — val columns carry the last computed value ──
             with open(self.csv_path, "a", newline="") as f:
                 csv.writer(f).writerow([epoch, f"{train_loss:.6f}",
                                         f"{self._last_val_dice:.4f}",
-                                        f"{self._last_val_iou:.4f}"])
+                                        f"{self._last_val_iou:.4f}",
+                                        f"{ent:.4f}", f"{fg:.5f}"])
 
             # ── TensorBoard ──────────────────
             if self.writer:
                 self.writer.add_scalar("Loss/train", train_loss, epoch)
+                self.writer.add_scalar("Collapse/pred_entropy", ent, epoch)
+                self.writer.add_scalar("Collapse/pred_fg_rate", fg, epoch)
                 if epoch % val_every == 0:
                     self.writer.add_scalar("Val/Dice", self._last_val_dice, epoch)
                     self.writer.add_scalar("Val/IoU", self._last_val_iou, epoch)
 
     # ──────────────────────────────────────────
 
-    def _train_one_epoch(self, loader: DataLoader, epoch: int) -> float:
+    def _train_one_epoch(self, loader: DataLoader, epoch: int) -> tuple[float, float, float]:
         self.student.train()
         self.teacher.model.eval()
 
@@ -146,6 +150,8 @@ class MeanTeacherTrainer:
         )
 
         loss_meter = AverageMeter()
+        # Collapse detectors: entropy catches flat-uncertain, fg_rate catches all-background.
+        ent_meter, fg_meter = AverageMeter(), AverageMeter()
         pbar = tqdm(loader, desc=f"Epoch {epoch}", leave=False)
 
         for batch in pbar:
@@ -171,10 +177,17 @@ class MeanTeacherTrainer:
             # ── EMA update ───────────────────
             self.teacher.update(self.student)
 
-            loss_meter.update(loss.item(), strong.shape[0])
-            pbar.set_postfix(loss=f"{loss_meter.avg:.4f}", lam=f"{lam:.3f}")
+            with torch.no_grad():
+                ent, fg = collapse_stats(student_out)
 
-        return loss_meter.avg
+            n = strong.shape[0]
+            loss_meter.update(loss.item(), n)
+            ent_meter.update(ent, n)
+            fg_meter.update(fg, n)
+            pbar.set_postfix(loss=f"{loss_meter.avg:.4f}", lam=f"{lam:.3f}",
+                             H=f"{ent_meter.avg:.3f}", fg=f"{fg_meter.avg:.4f}")
+
+        return loss_meter.avg, ent_meter.avg, fg_meter.avg
 
     # ──────────────────────────────────────────
 

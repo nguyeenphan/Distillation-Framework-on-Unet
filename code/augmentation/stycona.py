@@ -26,12 +26,15 @@ class StyConaAugmentor:
         self,
         style_alpha_range: tuple[float, float] = (0.3, 0.7),
         content_mix_enabled: bool = True,
-        content_t: float = 0.1,
+        content_t: float | tuple[float, float] = 0.1,
         top_k_ranks: int = 3,
         per_channel: bool = True,
     ):
         self.style_alpha_range = style_alpha_range
         self.content_mix_enabled = content_mix_enabled
+        # Paper draws the content weight per sample (beta ~ U(0,1)); a range
+        # keeps that diversity while capping the worst case at the label-validity
+        # ceiling found with verify_content_labels.py.  A float pins it.
         self.content_t = content_t
         self.top_k_ranks = top_k_ranks
         self.per_channel = per_channel
@@ -42,24 +45,31 @@ class StyConaAugmentor:
         self,
         image: np.ndarray,
         auxiliary: np.ndarray,
+        mode: str = "both",
     ) -> np.ndarray:
         """
         Args:
             image:     (H, W, C) uint8 – original x_i
-            auxiliary: (H, W, C) uint8 – CAST variant x_j (same content)
+            auxiliary: (H, W, C) uint8 – auxiliary x_j
+            mode:      "both" (StyCona as published) | "style" (blend sigma only)
+                       | "content" (mix U,V only). The two single-axis modes are
+                       what Spectral-Directional Consistency supervises separately.
         Returns:
             augmented: (H, W, C) float32 clipped to [0, 255]
         """
+        assert mode in ("both", "style", "content"), f"Unknown mode: {mode}"
         assert image.shape == auxiliary.shape, "image & auxiliary must have same shape"
 
         img_f = image.astype(np.float32)
         aux_f = auxiliary.astype(np.float32)
         alpha = np.random.uniform(*self.style_alpha_range)
+        t = (np.random.uniform(*self.content_t)
+             if isinstance(self.content_t, (tuple, list)) else self.content_t)
 
         if self.per_channel:
             channels = []
             for c in range(img_f.shape[2]):
-                aug_c = self._augment_channel(img_f[:, :, c], aux_f[:, :, c], alpha)
+                aug_c = self._augment_channel(img_f[:, :, c], aux_f[:, :, c], alpha, mode, t)
                 channels.append(aug_c)
             augmented = np.stack(channels, axis=2)
         else:
@@ -67,7 +77,7 @@ class StyConaAugmentor:
             H, W, C = img_f.shape
             img_2d = img_f.reshape(H, W * C)
             aux_2d = aux_f.reshape(H, W * C)
-            aug_2d = self._augment_channel(img_2d, aux_2d, alpha)
+            aug_2d = self._augment_channel(img_2d, aux_2d, alpha, mode, t)
             augmented = aug_2d.reshape(H, W, C)
 
         return np.clip(augmented, 0, 255)
@@ -79,6 +89,8 @@ class StyConaAugmentor:
         xi: np.ndarray,
         xj: np.ndarray,
         alpha: float,
+        mode: str = "both",
+        t: float | None = None,
     ) -> np.ndarray:
         """
         SVD decompose → blend σ → optionally mix top-k u,v → recompose.
@@ -89,12 +101,16 @@ class StyConaAugmentor:
         Uj, sj, Vjt = np.linalg.svd(xj, full_matrices=False)
 
         # Step 2: Style blend — interpolate singular values
-        s_blended = alpha * si + (1.0 - alpha) * sj
+        if mode in ("both", "style"):
+            s_blended = alpha * si + (1.0 - alpha) * sj
+        else:
+            s_blended = si
 
         # Step 3: Content mix — gentle perturbation on top-k rank components
-        if self.content_mix_enabled and self.top_k_ranks > 0:
+        if mode in ("both", "content") and self.content_mix_enabled and self.top_k_ranks > 0:
             k = min(self.top_k_ranks, len(si))
-            t = self.content_t
+            if t is None:
+                t = self.content_t
             # mix only the top-k left/right singular vectors
             U_mix = Ui.copy()
             Vt_mix = Vit.copy()

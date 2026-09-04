@@ -53,6 +53,8 @@ class LeafDiseaseDataset(Dataset):
         auxiliary_from_styles: bool = False,
         stycona=None,
         view_gen=None,
+        spectral: bool = False,
+        style_twin: str = "spectral",
     ):
         """
         Args:
@@ -62,6 +64,15 @@ class LeafDiseaseDataset(Dataset):
             auxiliary_from_styles: if True, StyCona's auxiliary is drawn only from
                                    the CAST `_style{n}` variants of the same leaf
                                    (never the base photo).
+            spectral:              if True, emit the Spectral-Directional twins
+                                   (x, x_style, x_content) instead of strong/weak
+                                   views.  The style twin uses a same-leaf CAST
+                                   auxiliary (content provably unchanged); the
+                                   content twin uses a DIFFERENT leaf, otherwise
+                                   u_j ~ u_i and the content axis is a no-op.
+            style_twin:            "spectral" (blend sigma) or "jitter" (colour
+                                   jitter via view_gen) — ablation D asks whether
+                                   the spectral twin beats a plain photometric one.
         """
         self.root_dir = Path(root_dir)
         self.image_size = image_size
@@ -69,6 +80,9 @@ class LeafDiseaseDataset(Dataset):
         self.auxiliary_from_styles = auxiliary_from_styles
         self.stycona = stycona
         self.view_gen = view_gen
+        self.spectral = spectral
+        assert style_twin in ("spectral", "jitter"), f"Unknown style_twin: {style_twin}"
+        self.style_twin = style_twin
 
         # ── Discover all image / mask pairs ──────────────
         # records holds EVERY image (base + styles); samples is the subset used
@@ -112,6 +126,13 @@ class LeafDiseaseDataset(Dataset):
         else:
             self.samples = list(range(len(self.records)))
 
+        # Content donors are drawn from real photos only: the content axis should
+        # borrow another leaf's anatomy, not a CAST rendering's synthetic texture.
+        # (89% of records are restyles, so an unfiltered draw leaks style into the
+        # content twin.)  Falls back to all records if the split has no base photos.
+        self._base_records = [i for i, r in enumerate(self.records)
+                              if r["style_idx"] == "base"] or list(range(len(self.records)))
+
         assert len(self.samples) > 0, f"No image/mask pairs found in {root_dir}"
         print(f"  {root_dir}: {len(self.samples)} samples "
               f"({len(self.records)} images, {len(self.content_pool)} unique leaves)"
@@ -141,6 +162,23 @@ class LeafDiseaseDataset(Dataset):
 
         auxiliary = cv2.resize(auxiliary, (self.image_size, self.image_size))
         mask = torch.from_numpy(mask).long()
+
+        # ── Spectral-Directional twins (runs in DataLoader worker) ──
+        if self.spectral and self.stycona is not None:
+            if self.style_twin == "spectral":
+                x_style = self._to_tensor(self.stycona(image, auxiliary, mode="style"))
+            else:
+                # Ablation D: same invariance loss, photometric twin instead.
+                x_style = self.view_gen(self._to_tensor(image))[0]
+            # Content twin must come from another leaf, else u_j ~ u_i (no-op).
+            content_aux = self._sample_other_leaf(rec["content_id"])
+            x_content = self.stycona(image, content_aux, mode="content")
+            return {
+                "image": self._to_tensor(image),
+                "x_style": x_style,
+                "x_content": self._to_tensor(x_content),
+                "mask": mask,
+            }
 
         # ── StyCona + views (runs in DataLoader worker) ──
         if self.stycona is not None and self.view_gen is not None:
@@ -173,6 +211,14 @@ class LeafDiseaseDataset(Dataset):
             candidates = [current_idx]  # leaf has no other variant → use itself
         aux_idx = random.choice(candidates)
         return self._read_image(self.records[aux_idx]["image"])
+
+    def _sample_other_leaf(self, content_id: str) -> np.ndarray:
+        """Pick a random base photo from a DIFFERENT leaf (content donor, i != j)."""
+        for _ in range(10):
+            idx = random.choice(self._base_records)
+            if self.records[idx]["content_id"] != content_id:
+                return self._read_image(self.records[idx]["image"])
+        return self._read_image(self.records[idx]["image"])  # single-leaf dataset
 
     def _read_image(self, path: Path) -> np.ndarray:
         img = cv2.imread(str(path), cv2.IMREAD_COLOR)

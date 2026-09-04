@@ -47,3 +47,16 @@ def compute_metrics(
         "precision": np.mean(precisions),
         "recall": np.mean(recalls),
     }
+
+
+def collapse_stats(logits: torch.Tensor) -> tuple[float, float]:
+    """Two collapse detectors for a consistency-regularised segmenter.
+
+    Returns (mean per-pixel entropy, predicted foreground rate).
+    Entropy rising toward ln(C) => flat-uncertain collapse.
+    Foreground rate falling toward 0 => all-background collapse.
+    """
+    probs = torch.softmax(logits, dim=1)
+    entropy = -(probs * probs.clamp_min(1e-8).log()).sum(1).mean()
+    fg_rate = (logits.argmax(1) == 1).float().mean()
+    return entropy.item(), fg_rate.item()
