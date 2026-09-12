@@ -4,13 +4,14 @@ Spectral-Directional Consistency Trainer
 Directional supervision over StyCona's SVD axes (see spectral_direction.html):
 
   x_style   = blend sigma only  → appearance changes, structure does not
-                                → HARD INVARIANCE:  D(f(x), sg[f(x_style)])
+                                → HARD INVARIANCE:  D(f(x), teacher(x_style))
   x_content = mix U,V only      → structure changes
                                 → plain supervision against y (no invariance)
 
   L = L_sup + lam_c * L_cont + lam_s(t) * L_style
 
-No teacher, no EMA — stop-gradient on the style branch is the stabiliser.
+EMA teacher supplies the style target: stop-gradient alone left the style term
+at 0.6% of the loss, so nothing was stabilising the run.
 Ablations are config toggles, not code paths:
   B : lambda_content = 0
   C : both lambdas on
@@ -22,7 +23,6 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -34,7 +34,8 @@ try:
 except ImportError:
     _TB_AVAILABLE = False
 
-from losses.losses import SupervisedLoss, consistency_weight
+from models.ema import EMAModel
+from losses.losses import SupervisedLoss, ConsistencyLoss, consistency_weight
 from utils.metrics import compute_metrics, collapse_stats
 from utils.helpers import save_checkpoint, AverageMeter
 
@@ -45,6 +46,9 @@ class SpectralTrainer:
         self.cfg = cfg
         self.device = device
         self.model = model.to(device)
+        # Teacher targets the style branch — an EMA target is a moving average of
+        # the student, which a raw stop-gradient copy is not.
+        self.teacher = EMAModel(model, decay=cfg["spectral"]["ema_decay"]).to(device)
 
         lcfg = cfg["loss"]
         self.sup_loss = SupervisedLoss(
@@ -54,6 +58,7 @@ class SpectralTrainer:
             focal_gamma=lcfg["supervised"].get("focal_gamma", 2.0),
             focal_alpha=lcfg["supervised"].get("focal_alpha", None),
         )
+        self.cons_loss = ConsistencyLoss(loss_type=lcfg["consistency"]["type"])
 
         scfg = cfg["spectral"]
         self.lam_c = scfg["lambda_content"]
@@ -141,6 +146,7 @@ class SpectralTrainer:
 
     def _train_one_epoch(self, loader: DataLoader, epoch: int) -> dict:
         self.model.train()
+        self.teacher.model.eval()
         lam_s = consistency_weight(epoch, self.lam_s_max, self.rampup)
 
         meters = {k: AverageMeter() for k in ("loss", "l_sup", "l_cont", "l_style", "ent", "fg")}
@@ -165,9 +171,8 @@ class SpectralTrainer:
             # CAST restyle), so the whole probability map must hold still.
             if lam_s > 0:
                 with torch.no_grad():
-                    out_s = self.model(x_style)
-                l_style = F.mse_loss(F.softmax(out, dim=1),
-                                     F.softmax(out_s, dim=1))
+                    out_s = self.teacher(x_style)
+                l_style = self.cons_loss(out, out_s)
             else:
                 l_style = torch.zeros((), device=self.device)
 
@@ -176,6 +181,7 @@ class SpectralTrainer:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            self.teacher.update(self.model)
 
             with torch.no_grad():
                 ent, fg = collapse_stats(out)

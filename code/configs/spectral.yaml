@@ -31,20 +31,27 @@ model:
 # StyCona ở đây chỉ là bộ sinh twin; mỗi nhánh chỉ dùng một trục.
 stycona:
   enabled: true
-  style_alpha_range: [0.1, 0.4]
+  # Nới ra: [0.1,0.4] làm x_style ~ x, l_style tụt còn 0.6% tổng loss (no-op).
+  style_alpha_range: [0.3, 0.7]
   content_mix:
     enabled: true
     # t ~ U(lo, hi) mỗi sample — đúng tinh thần β~U(0,1) của paper.
-    # Trần 0.7 verify bằng verify_content_labels.py với donor là ảnh gốc thật.
-    # Đặt một số thay vì list nếu muốn cố định.
-    t: [0.15, 0.7]
-    top_k_ranks: 16              # đo được: bão hoà sau ~16, k không phải nút vặn
+    # 0.7 là TRẦN label-validity của verify_content_labels.py, không phải giá trị
+    # nên dùng: run trước l_cont đóng băng ở 0.33 (nhãn y không còn khớp x_content).
+    # Về mức baseline default.yaml (t=0.1, k=3) để y còn hợp lệ.
+    t: [0.05, 0.2]
+    top_k_ranks: 3
   per_channel_svd: true
 
 spectral:
-  lambda_content: 1.0            # 0.0 → ablation B
-  lambda_style_max: 0.5          # thấp hơn Mean Teacher (1.0) — xem ghi chú
-  style_rampup_epochs: 40
+  # Nhánh content mang nhãn gần-đúng → weight phụ, không ngang supervised.
+  # Run trước lam_c=1.0 cho nó 58% gradient.
+  lambda_content: 0.3            # 0.0 → ablation B
+  # Bằng consistency_weight_max của default.yaml → spectral vs MT khác nhau
+  # CHỈ ở twins, không ở hyperparameter.
+  lambda_style_max: 1.0
+  style_rampup_epochs: 30
+  ema_decay: 0.999               # bằng default.yaml
   fg_rate_floor: 0.005           # dừng run nếu prediction xẹp về toàn background
 
 # Chỉ dùng khi style_twin: "jitter"
@@ -59,6 +66,8 @@ views:
     gaussian_blur_prob: 0.0
 
 loss:
+  consistency:
+    type: "mse"                  # như Mean Teacher; KL batchmean scale gấp ~65k lần
   supervised:
     focal_weight: 1.0
     focal_gamma: 2.0
@@ -67,11 +76,12 @@ loss:
     l1_weight: 0.5
 
 training:
+  # Khớp default.yaml (baseline Dice 0.6512) để so sánh fair.
   epochs: 150
-  batch_size: 8
-  lr: 0.0003
+  batch_size: 16
+  lr: 5.0e-4
   weight_decay: 0.0001
-  warmup_epochs: 0
+  warmup_epochs: 10
   val_every: 5
   save_every: 0
   save_dir: "./checkpoints/spectral"
