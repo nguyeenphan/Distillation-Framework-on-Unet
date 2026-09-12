@@ -1,0 +1,8 @@
+  ../dataset/test: 522 samples (522 images, 58 unique leaves)
+========================================
+Test results on: ../dataset/test
+  IoU:       0.4521
+  Dice:      0.6227
+  Precision: 0.6805
+  Recall:    0.5740
+========================================
