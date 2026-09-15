@@ -158,14 +158,21 @@ class SpectralTrainer:
             x_content = batch["x_content"].to(self.device)
             y = batch["mask"].to(self.device)
 
-            out = self.model(x)
-            l_sup = self.sup_loss(out, y)
+            self.optimizer.zero_grad()
 
             # Content axis: structure moved, so only the label constrains it.
+            # Independent graph from the main branch below — backward it first
+            # and let it free before building the next one. Two full forward
+            # graphs (this head runs ASPP at full resolution) held alive at
+            # once is what was blowing past the MPS memory ceiling.
             if self.lam_c > 0:
                 l_cont = self.sup_loss(self.model(x_content), y)
+                (self.lam_c * l_cont).backward()
             else:
                 l_cont = torch.zeros((), device=self.device)
+
+            out = self.model(x)
+            l_sup = self.sup_loss(out, y)
 
             # Style axis: structure is unchanged by construction (same leaf,
             # CAST restyle), so the whole probability map must hold still.
@@ -176,10 +183,9 @@ class SpectralTrainer:
             else:
                 l_style = torch.zeros((), device=self.device)
 
-            loss = l_sup + self.lam_c * l_cont + lam_s * l_style
+            (l_sup + lam_s * l_style).backward()
+            loss = l_sup.detach() + self.lam_c * l_cont.detach() + lam_s * l_style.detach()
 
-            self.optimizer.zero_grad()
-            loss.backward()
             self.optimizer.step()
             self.teacher.update(self.model)
 
