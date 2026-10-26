@@ -11,8 +11,8 @@ in the leading ranks), so content_t is the knob that actually moves the
 image.  Sweeps t with the mask overlaid; pick the LARGEST t where the
 lesion boundary still sits inside the red overlay.
 
-    python scripts/verify_content_labels.py --config configs/spectral.yaml
-    python scripts/verify_content_labels.py --ks 3,8,16,32 --n 4
+    python verify_content_labels.py --config ../code/configs/spectral.yaml
+    python verify_content_labels.py --ks 3,8,16,32 --n 4
 """
 
 import argparse
@@ -23,22 +23,22 @@ import yaml
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code"))
 
 from data.dataset import LeafDiseaseDataset
 from augmentation.stycona import StyConaAugmentor
-from scripts.visualize_stycona import _chw_to_hwc_uint8, _overlay_mask, _add_label
+from visualize_stycona import _chw_to_hwc_uint8, _overlay_mask, _add_label
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="configs/spectral.yaml")
+    p.add_argument("--config", default="../code/configs/spectral.yaml")
     p.add_argument("--split", default="train", choices=["train", "val", "test"])
     p.add_argument("--ks", default="16", help="top_k_ranks values to sweep")
     p.add_argument("--ts", default="0.15,0.3,0.5,0.7",
                    help="content_t values to sweep — this is the knob that matters")
     p.add_argument("--n", type=int, default=4)
-    p.add_argument("--out", default="viz_content")
+    p.add_argument("--out", default="../outputs/visual/viz_content")
     args = p.parse_args()
 
     cfg = yaml.safe_load(open(args.config))

@@ -7,8 +7,8 @@ Loads a few samples from a split, runs each through StyConaAugmentor
     [ original | auxiliary (xj) | StyCona augmented | mask overlay ]
 
 Usage:
-    python scripts/visualize_stycona.py --config configs/default.yaml
-    python scripts/visualize_stycona.py --split train --n 6 --out viz
+    python visualize_stycona.py --config ../code/configs/default.yaml
+    python visualize_stycona.py --split train --n 6 --out ../outputs/visual/viz
 """
 
 import argparse
@@ -19,7 +19,7 @@ import yaml
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code"))
 
 from data.dataset import LeafDiseaseDataset
 from augmentation.stycona import StyConaAugmentor
@@ -50,10 +50,10 @@ def _add_label(img_uint8, text, strip_h=26):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="configs/default.yaml")
+    p.add_argument("--config", default="../code/configs/default.yaml")
     p.add_argument("--split", default="train", choices=["train", "val", "test"])
     p.add_argument("--n", type=int, default=6, help="number of samples to render")
-    p.add_argument("--out", default="viz", help="output directory")
+    p.add_argument("--out", default="../outputs/visual/viz", help="output directory")
     args = p.parse_args()
 
     cfg = yaml.safe_load(open(args.config))

@@ -16,8 +16,8 @@ Renders a 4-row × 3-col grid for each sample:
     [ StyCona output ]  [ Strong view (Student) ]  [ Weak view (Teacher) ]
 
 Usage:
-    python viz/stycona_cases.py --config configs/default.yaml
-    python viz/stycona_cases.py --split train --n 4 --out viz/cases
+    python stycona_cases.py --config ../code/configs/default.yaml
+    python stycona_cases.py --split train --n 4 --out ../outputs/visual/viz/cases
 """
 
 import argparse
@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code"))
 
 from augmentation.stycona import StyConaAugmentor
 from augmentation.view_generator import ViewGenerator
@@ -234,10 +234,10 @@ def build_grid(
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="configs/default.yaml")
+    p.add_argument("--config", default="../code/configs/default.yaml")
     p.add_argument("--split",  default="train", choices=["train", "val", "test"])
     p.add_argument("--n",      type=int, default=4, help="number of leaves to render")
-    p.add_argument("--out",    default="viz/cases", help="output directory")
+    p.add_argument("--out",    default="../outputs/visual/viz/cases", help="output directory")
     args = p.parse_args()
 
     cfg  = yaml.safe_load(open(args.config))

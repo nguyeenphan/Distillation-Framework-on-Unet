@@ -3,15 +3,15 @@ evaluate.py — Run inference on test set or unseen domains
 ─────────────────────────────────────────────────────────
 Usage:
     python scripts/evaluate.py --config configs/default.yaml \
-        --checkpoint checkpoints/best.pth
+        --checkpoint ../outputs/checkpoints/best.pth
 
     # Save visual comparisons:
     python scripts/evaluate.py --config configs/default.yaml \
-        --checkpoint checkpoints/best.pth --vis_dir ./visualizations
+        --checkpoint ../outputs/checkpoints/best.pth --vis_dir ../outputs/visual/visualizations
 
     # Custom test directory:
     python scripts/evaluate.py --config configs/default.yaml \
-        --checkpoint checkpoints/best.pth --test_dir ./unseen_domain
+        --checkpoint ../outputs/checkpoints/best.pth --test_dir ./unseen_domain
 """
 
 import argparse

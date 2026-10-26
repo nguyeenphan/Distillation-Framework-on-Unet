@@ -36,12 +36,16 @@ Leaf disease segmentation models trained on a single visual domain often fail wh
 
 ```
 Distillation-Framework-on-Unet/
-├── dataset/
-│   ├── train/
-│   ├── val/
-│   └── test/
+├── dataset/                          # images + masks (train/val/test)
+├── outputs/                          # checkpoints, TensorBoard logs, visual dumps
+├── writeup/                          # thesis chapter, bib, diagrams, figures/
+├── side-script/                      # one-off analysis + figure scripts
+│   ├── visualize_stycona.py          # quick 4-panel StyCona preview
+│   ├── stycona_cases.py              # full case breakdown of StyCona pipeline
+│   ├── verify_content_labels.py      # sweep content mix strength vs label validity
+│   └── make_method_figures.py        # figures for the Methodology chapter
 │
-└── code/
+└── code/                             # the framework
     ├── configs/
     │   └── default.yaml              # all hyperparameters in one place
     │
@@ -67,18 +71,11 @@ Distillation-Framework-on-Unet/
     │   ├── metrics.py                # IoU, Dice, precision, recall
     │   └── helpers.py                # seed, checkpoint save/load, AverageMeter
     │
-    ├── scripts/
-    │   ├── train.py                  # entry-point: parse config → build → train
-    │   ├── evaluate.py               # inference on test set with optional visual output
-    │   ├── visualize_stycona.py      # quick 4-panel StyCona preview
-    │   └── stycona_cases.py          # full 6-row case breakdown of StyCona pipeline
+    ├── tests/                        # unit tests for spectral EMA + collapse stats
     │
-    ├── checkpoints/
-    │   └── best.pth                  # best student checkpoint (by val Dice)
-    │
-    └── logs/
-        ├── train_log.csv             # epoch, train_loss, val_dice, val_iou
-        └── events.out.tfevents.*     # TensorBoard log
+    └── scripts/
+        ├── train.py                  # entry-point: parse config → build → train
+        └── evaluate.py               # inference on test set with optional visual output
 ```
 
 ---
@@ -134,13 +131,13 @@ cd code
 ```
 
 **Outputs:**
-- `checkpoints/best.pth` — best student model by validation Dice
-- `logs/train_log.csv` — per-epoch `train_loss`, `val_dice`, `val_iou`
-- `logs/events.out.tfevents.*` — TensorBoard log
+- `../outputs/checkpoints/best.pth` — best student model by validation Dice
+- `../outputs/logs/train_log.csv` — per-epoch `train_loss`, `val_dice`, `val_iou`
+- `../outputs/logs/events.out.tfevents.*` — TensorBoard log
 
 Monitor training with TensorBoard:
 ```bash
-.venv/bin/tensorboard --logdir logs/
+.venv/bin/tensorboard --logdir ../outputs/logs/
 ```
 
 ### Evaluate
@@ -149,13 +146,13 @@ Monitor training with TensorBoard:
 # All images (base + style variants)
 .venv/bin/python3 scripts/evaluate.py \
     --config configs/default.yaml \
-    --checkpoint checkpoints/best.pth \
-    --vis_dir ./visualizations
+    --checkpoint ../outputs/checkpoints/best.pth \
+    --vis_dir ../outputs/visual/visualizations
 
 # Base images only
 .venv/bin/python3 scripts/evaluate.py \
     --config configs/default.yaml \
-    --checkpoint checkpoints/best.pth \
+    --checkpoint ../outputs/checkpoints/best.pth \
     --base_only
 ```
 
@@ -165,10 +162,11 @@ The `--vis_dir` flag saves a side-by-side PNG per image: **Original | Ground Tru
 
 ```bash
 # Quick 4-panel preview (original | auxiliary | StyCona | mask)
-.venv/bin/python3 scripts/visualize_stycona.py --config configs/default.yaml --n 6
+cd ../side-script
+../code/.venv/bin/python3 visualize_stycona.py --n 6
 
 # Full 6-row case breakdown
-.venv/bin/python3 scripts/stycona_cases.py --config configs/default.yaml --n 4 --out viz/cases
+../code/.venv/bin/python3 stycona_cases.py --n 4
 ```
 
 The full breakdown shows:

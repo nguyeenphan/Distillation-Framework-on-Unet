@@ -83,5 +83,5 @@ training:
   warmup_epochs: 5                       # giảm từ 10
   val_every: 1
   save_every: 10
-  save_dir: "./checkpoints_run2"
-  log_dir: "./logs_run2"
+  save_dir: "../outputs/checkpoints_run2"
+  log_dir: "../outputs/logs_run2"

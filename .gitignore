@@ -71,6 +71,7 @@ tb_logs/
 tensorboard/
 wandb/
 mlruns/
+writeup/
 
 # ---- Data (large / generated) ----
 dataset/

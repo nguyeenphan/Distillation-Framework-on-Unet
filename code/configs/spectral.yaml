@@ -84,5 +84,5 @@ training:
   warmup_epochs: 10
   val_every: 5
   save_every: 0
-  save_dir: "./checkpoints/spectral"
-  log_dir: "./logs/spectral"
+  save_dir: "../outputs/checkpoints/spectral"
+  log_dir: "../outputs/logs/spectral"

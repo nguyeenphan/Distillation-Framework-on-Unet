@@ -72,5 +72,5 @@ training:
   warmup_epochs: 10
   val_every: 1
   save_every: 10           # save a checkpoint every N epochs (0 = disabled)
-  save_dir: "./checkpoints"
-  log_dir: "./logs"
+  save_dir: "../outputs/checkpoints"
+  log_dir: "../outputs/logs"

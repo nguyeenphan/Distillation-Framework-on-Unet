@@ -9,7 +9,7 @@ illustrating the method in general:
   fig-label-validity     how the ceiling on t was established
   fig-rank-saturation    why k is not a hyperparameter worth sweeping
 
-    python scripts/make_method_figures.py --out images
+    python make_method_figures.py --out ../writeup/figures
 """
 
 import argparse
@@ -23,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code"))
 
 from data.dataset import LeafDiseaseDataset
 from augmentation.stycona import StyConaAugmentor
@@ -96,8 +96,8 @@ def aug(sc, t, k):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", default="configs/spectral.yaml")
-    p.add_argument("--out", default="images")
+    p.add_argument("--config", default="../code/configs/spectral.yaml")
+    p.add_argument("--out", default="../writeup/figures")
     args = p.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
